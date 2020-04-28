@@ -59,7 +59,7 @@ contract SubstrateBridge {
 	}
 
 	/// Initializes bridge contract.
-	/// @param rawInitialHeader Raw finalized header that will be ancestor of all importing headers.
+	/// @param rawInitialHeader Raw finalized header that will be ancestor of all imported headers.
 	/// @param initialValidatorsSetId ID of validators set that must finalize direct children of the initial header.
 	/// @param initialValidatorsSet Raw validators set that must finalize direct children of the initial header.
 	constructor(
@@ -122,8 +122,18 @@ contract SubstrateBridge {
 	function importHeader(
 		bytes memory rawHeader
 	) public {
-		// parse and save header
+		// parse header
 		ParsedHeader memory header = parseSubstrateHeader(rawHeader);
+		require(
+			!headerByHash[header.hash].isKnown,
+			"Header is already known"
+		);
+		require(
+			header.number > bestFinalizedHeaderNumber,
+			"Trying to import non-canonical header"
+		);
+
+		// check if we're able to coninue chain with this header
 		Header storage parentHeader = headerByHash[header.parentHash];
 		require(
 			parentHeader.isKnown && parentHeader.number == header.number - 1,
@@ -144,6 +154,10 @@ contract SubstrateBridge {
 		bytes32 prevSignalHeaderHash = parentHeader.prevSignalHeaderHash;
 		uint256 prevSignalTargetNumber = parentHeader.prevSignalTargetNumber;
 		if (header.signal.length != 0) {
+			require(
+				validatorsSetId != MAX_VALIDATORS_SET_ID,
+				"Reached maximal validators set id"
+			);
 			require(
 				prevSignalTargetNumber < header.number,
 				"Overlapping signals found"
@@ -367,6 +381,9 @@ contract SubstrateBridge {
 
 		return finalityTargetHash;
 	}
+
+	/// Maximal validators set id supported by the contract.
+	uint64 constant MAX_VALIDATORS_SET_ID = 0xFFFFFFFFFFFFFFFF;
 
 	/// Address of parse_substrate_header builtin.
 	uint256 constant SUBSTRATE_PARSE_HEADER_BUILTIN_ADDRESS = 0x10;
