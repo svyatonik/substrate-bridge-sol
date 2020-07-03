@@ -117,56 +117,28 @@ contract SubstrateBridge {
 		}
 		return (incompleteHeadersNumbers, incompleteHeadersHashes);
 	}
+	
+	/// Returns true if header would require finality proof.
+	function isIncompleteHeader(bytes memory rawHeader) public view returns (bool) {
+	    (
+	        ParsedHeader memory header,
+	        ,
+	        ,
+	        uint256 prevSignalTargetNumber
+	    ) = prepareSubstrateHeaderForImport(rawHeader);
+	    return (prevSignalTargetNumber == header.number);
+	}
 
 	/// Import header.
 	function importHeader(
 		bytes memory rawHeader
 	) public {
-		// parse header
-		ParsedHeader memory header = parseSubstrateHeader(rawHeader);
-		require(
-			!headerByHash[header.hash].isKnown,
-			"Header is already known"
-		);
-		require(
-			header.number > bestFinalizedHeaderNumber,
-			"Trying to import non-canonical header"
-		);
-
-		// check if we're able to coninue chain with this header
-		Header storage parentHeader = headerByHash[header.parentHash];
-		require(
-			parentHeader.isKnown && parentHeader.number == header.number - 1,
-			"Missing parent header from the storage"
-		);
-
-		// forbid appending to fork until we'll get finality proof for header that
-		// requires it
-		if (parentHeader.prevSignalTargetNumber != 0 && parentHeader.prevSignalTargetNumber == parentHeader.number) {
-			require(
-				bestFinalizedHeaderHash == header.parentHash,
-				"Missing required finality proof for parent header"
-			);
-		}
-
-		// forbid overlapping signals
-		uint64 validatorsSetId = parentHeader.validatorsSetId;
-		bytes32 prevSignalHeaderHash = parentHeader.prevSignalHeaderHash;
-		uint256 prevSignalTargetNumber = parentHeader.prevSignalTargetNumber;
-		if (header.signal.length != 0) {
-			require(
-				validatorsSetId != MAX_VALIDATORS_SET_ID,
-				"Reached maximal validators set id"
-			);
-			require(
-				prevSignalTargetNumber < header.number,
-				"Overlapping signals found"
-			);
-
-			validatorsSetId = validatorsSetId + 1;
-			prevSignalHeaderHash = header.hash;
-			prevSignalTargetNumber = header.number + header.signalDelay;
-		}
+	    (
+	        ParsedHeader memory header,
+	        uint64 validatorsSetId,
+	        bytes32 prevSignalHeaderHash,
+	        uint256 prevSignalTargetNumber
+	    ) = prepareSubstrateHeaderForImport(rawHeader);
 
 		// remember if we need finality proof for this header
 		if (prevSignalTargetNumber == header.number) {
@@ -265,6 +237,59 @@ contract SubstrateBridge {
 				break;
 			}
 		}
+	}
+
+	/// Returns parsed header, validators set id, previous signal header hash and previous signal target number.
+	function prepareSubstrateHeaderForImport(
+	    bytes memory rawHeader
+	) private view returns (ParsedHeader memory, uint64, bytes32, uint256) {
+		// parse header
+		ParsedHeader memory header = parseSubstrateHeader(rawHeader);
+		require(
+			!headerByHash[header.hash].isKnown,
+			"Header is already known"
+		);
+		require(
+			header.number > bestFinalizedHeaderNumber,
+			"Trying to import non-canonical header"
+		);
+
+		// check if we're able to coninue chain with this header
+		Header storage parentHeader = headerByHash[header.parentHash];
+		require(
+			parentHeader.isKnown && parentHeader.number == header.number - 1,
+			"Missing parent header from the storage"
+		);
+
+		// forbid appending to fork until we'll get finality proof for header that
+		// requires it
+		if (parentHeader.prevSignalTargetNumber != 0 && parentHeader.prevSignalTargetNumber == parentHeader.number) {
+			require(
+				bestFinalizedHeaderHash == header.parentHash,
+				"Missing required finality proof for parent header"
+			);
+		}
+
+		// forbid overlapping signals
+		uint64 validatorsSetId = parentHeader.validatorsSetId;
+		bytes32 prevSignalHeaderHash = parentHeader.prevSignalHeaderHash;
+		uint256 prevSignalTargetNumber = parentHeader.prevSignalTargetNumber;
+		if (header.signal.length != 0) {
+			require(
+				validatorsSetId != MAX_VALIDATORS_SET_ID,
+				"Reached maximal validators set id"
+			);
+			require(
+				prevSignalTargetNumber < header.number,
+				"Overlapping signals found"
+			);
+
+			validatorsSetId = validatorsSetId + 1;
+			prevSignalHeaderHash = header.hash;
+			prevSignalTargetNumber = header.number + header.signalDelay;
+		}
+
+        return (header, validatorsSetId, prevSignalHeaderHash, prevSignalTargetNumber);
 	}
 
 	/// Parse Substrate header.
