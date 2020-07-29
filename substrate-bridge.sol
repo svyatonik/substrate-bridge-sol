@@ -21,6 +21,24 @@ pragma solidity ^0.6.4;
 
 /// @title Substrate-to-PoA Bridge Contract.
 contract SubstrateBridge {
+	/// Header check result.
+	enum HeaderCheckResult {
+		/// Header is valid and may be imported.
+		Valid,
+		/// Header is already known.
+		AlreadyKnown,
+		/// Header is non-canonical.
+		NonCanonical,
+		/// Parent header is missing from the storage.
+		MissingParent,
+		/// Parent Header requires finality proof.
+		FinalityProofRequired,
+		/// Too much validators sets (should never happen in practice).
+		InvalidValidatorsSetId,
+		/// Validators set change signals overlap.
+		ValidatorsSignalsOverlap
+	}
+
 	/// Parsed header.
 	struct ParsedHeader {
 		/// Header hash.
@@ -117,61 +135,108 @@ contract SubstrateBridge {
 		}
 		return (incompleteHeadersNumbers, incompleteHeadersHashes);
 	}
-	
-	/// Returns true if header would require finality proof.
-	function isIncompleteHeader(bytes memory rawHeader) public view returns (bool) {
-	    (
-	        ParsedHeader memory header,
-	        ,
-	        ,
-	        uint256 prevSignalTargetNumber
-	    ) = prepareSubstrateHeaderForImport(rawHeader);
-	    return (prevSignalTargetNumber == header.number);
-	}
 
-	/// Import header.
-	function importHeader(
-		bytes memory rawHeader
-	) public {
-	    (
-	        ParsedHeader memory header,
-	        uint64 validatorsSetId,
-	        bytes32 prevSignalHeaderHash,
-	        uint256 prevSignalTargetNumber
-	    ) = prepareSubstrateHeaderForImport(rawHeader);
-
-		// remember if we need finality proof for this header
-		if (prevSignalTargetNumber == header.number) {
-			// TODO:
-			//
-			// In current implementation any submitter may submit any (invalid) block B that signals validators
-			// set change in N blocks. This would require relay to ask Substrate node for finality proof and
-			// submit it here, if it exists. So by spamming contract with signal headers, malicious submitter
-			// can significantly slow down sync just because actual block that will need finality proof will
-			// be waiting in the relay queue to be processed + incompleteHeadersNumbers may grow without any
-			// limits.
-			//
-			// One solution would be to have reputation system - initially you may submit only one block-with-signal
-			// (or you may submit it only once every N blocks). When your block-with-signal is finalized, your
-			// reputation is increased and you may submit multiple blocks-with-signals (and they got priority in
-			// the queue), but with every submitted block-with-signal, it decreases. This should cause honest
-			// competition for block-with-signal 'slots' even if malicious submitters are present.
-			uint256 incompleteHeaderHashIndex = incompleteHeadersHashes.length;
-			incompleteHeadersHashes.push(header.hash);
-			incompleteHeadersIndices[header.hash] = incompleteHeaderHashIndex + 1;
+	/// Returns 1-based index of first header that requires finality proof.
+	/// Returns 0 if there are no such headers.
+	/// Fails if no headers can't be imported.
+	function isIncompleteHeaders(
+		bytes memory rawHeader1,
+		bytes memory rawHeader2,
+		bytes memory rawHeader3,
+		bytes memory rawHeader4
+	) public view returns (uint256) {
+		// check header1
+		ParsedHeader memory header1 = parseSubstrateHeader(rawHeader1);
+		Header memory parentHeader1 = headerByHash[header1.parentHash];
+		(
+			HeaderCheckResult checkResult1,
+			,
+			,
+			,
+			uint256 prevSignalTargetNumber1
+		) = prepareParsedSubstrateHeaderForImport(header1, parentHeader1);
+		require(
+			checkResult1 == HeaderCheckResult.Valid,
+			"Can't import any headers"
+		);
+		if (prevSignalTargetNumber1 == header1.number) {
+			return 1;
 		}
 
-		// store header in the storage
-		headerByHash[header.hash] = Header({
-			isKnown: true,
-			parentHash: header.parentHash,
-			number: header.number,
-			signal: header.signal,
-			validatorsSetId: validatorsSetId,
-			prevSignalHeaderHash: prevSignalHeaderHash,
-			prevSignalTargetNumber: prevSignalTargetNumber
-		});
-		lastImportedHeaderHash = header.hash;
+		// check header2
+		if (rawHeader2.length == 0)return 0;
+		Header memory header1AsParent = prepareEphemeralSubstrateHeader(header1, parentHeader1);
+		ParsedHeader memory header2 = parseSubstrateHeader(rawHeader2);
+		(
+			,
+			,
+			,
+			,
+			uint256 prevSignalTargetNumber2
+		) = prepareParsedSubstrateHeaderForImport(header2, header1AsParent);
+		if (prevSignalTargetNumber2 == header2.number) {
+			return 2;
+		}
+
+		// check header3
+		if (rawHeader2.length == 0)return 0;
+		Header memory header2AsParent = prepareEphemeralSubstrateHeader(header2, parentHeader1);
+		ParsedHeader memory header3 = parseSubstrateHeader(rawHeader3);
+		(
+			,
+			,
+			,
+			,
+			uint256 prevSignalTargetNumber3
+		) = prepareParsedSubstrateHeaderForImport(header3, header2AsParent);
+		if (prevSignalTargetNumber3 == header3.number) {
+			return 3;
+		}
+
+		// check header4
+		if (rawHeader2.length == 0)return 0;
+		Header memory header3AsParent = prepareEphemeralSubstrateHeader(header3, parentHeader1);
+		ParsedHeader memory header4 = parseSubstrateHeader(rawHeader4);
+		(
+			,
+			,
+			,
+			,
+			uint256 prevSignalTargetNumber4
+		) = prepareParsedSubstrateHeaderForImport(header4, header3AsParent);
+		if (prevSignalTargetNumber4 == header4.number) {
+			return 4;
+		}
+
+		return 0;
+	}
+
+
+	/// Import 4 headers.
+	function importHeaders(
+		bytes memory rawHeader1,
+		bytes memory rawHeader2,
+		bytes memory rawHeader3,
+		bytes memory rawHeader4
+	) public {
+		if (!importHeader(rawHeader1)) {
+			return;
+		}
+		if (rawHeader2.length != 0) {
+			if (!importHeader(rawHeader2)) {
+				return;
+			}
+		}
+		if (rawHeader3.length != 0) {
+			if (!importHeader(rawHeader3)) {
+				return;
+			}
+		}
+		if (rawHeader4.length != 0) {
+			if (!importHeader(rawHeader4)) {
+				return;
+			}
+		}
 	}
 
 	/// Import finality proof.
@@ -239,35 +304,96 @@ contract SubstrateBridge {
 		}
 	}
 
-	/// Returns parsed header, validators set id, previous signal header hash and previous signal target number.
+	/// Import header with fail-on-incomplete flag. Returns true if header has been imported AND next
+	/// header may be imported.
+	function importHeader(
+		bytes memory rawHeader
+	) private returns (bool) {
+		(
+			HeaderCheckResult checkResult,
+			ParsedHeader memory header,
+			uint64 validatorsSetId,
+			bytes32 prevSignalHeaderHash,
+			uint256 prevSignalTargetNumber
+		) = prepareSubstrateHeaderForImport(rawHeader);
+
+		// if we can't import this header, early return
+		if (checkResult != HeaderCheckResult.Valid) {
+			return false;
+		} 
+
+		// remember if we need finality proof for this header
+		bool requiresFinalityProof = prevSignalTargetNumber == header.number;
+		if (requiresFinalityProof) {
+			// TODO:
+			//
+			// In current implementation any submitter may submit any (invalid) block B that signals validators
+			// set change in N blocks. This would require relay to ask Substrate node for finality proof and
+			// submit it here, if it exists. So by spamming contract with signal headers, malicious submitter
+			// can significantly slow down sync just because actual block that will need finality proof will
+			// be waiting in the relay queue to be processed + incompleteHeadersNumbers may grow without any
+			// limits.
+			//
+			// One solution would be to have reputation system - initially you may submit only one block-with-signal
+			// (or you may submit it only once every N blocks). When your block-with-signal is finalized, your
+			// reputation is increased and you may submit multiple blocks-with-signals (and they got priority in
+			// the queue), but with every submitted block-with-signal, it decreases. This should cause honest
+			// competition for block-with-signal 'slots' even if malicious submitters are present.
+			uint256 incompleteHeaderHashIndex = incompleteHeadersHashes.length;
+			incompleteHeadersHashes.push(header.hash);
+			incompleteHeadersIndices[header.hash] = incompleteHeaderHashIndex + 1;
+		}
+
+		// store header in the storage
+		headerByHash[header.hash] = Header({
+			isKnown: true,
+			parentHash: header.parentHash,
+			number: header.number,
+			signal: header.signal,
+			validatorsSetId: validatorsSetId,
+			prevSignalHeaderHash: prevSignalHeaderHash,
+			prevSignalTargetNumber: prevSignalTargetNumber
+		});
+		lastImportedHeaderHash = header.hash;
+
+		return !requiresFinalityProof;
+	}
+
+	/// Returns header check result, parsed header, validators set id,
+	/// previous signal header hash and previous signal target number.
 	function prepareSubstrateHeaderForImport(
-	    bytes memory rawHeader
-	) private view returns (ParsedHeader memory, uint64, bytes32, uint256) {
-		// parse header
+		bytes memory rawHeader
+	) private view returns (HeaderCheckResult, ParsedHeader memory, uint64, bytes32, uint256) {
 		ParsedHeader memory header = parseSubstrateHeader(rawHeader);
-		require(
-			!headerByHash[header.hash].isKnown,
-			"Header is already known"
-		);
-		require(
-			header.number > bestFinalizedHeaderNumber,
-			"Trying to import non-canonical header"
-		);
+		Header memory parentHeader = headerByHash[header.parentHash];
+		return prepareParsedSubstrateHeaderForImport(header, parentHeader);
+	}
+
+	/// Returns header check result, parsed header, validators set id,
+	/// previous signal header hash and previous signal target number.
+	function prepareParsedSubstrateHeaderForImport(
+		ParsedHeader memory header,
+		Header memory parentHeader
+	) private view returns (HeaderCheckResult, ParsedHeader memory, uint64, bytes32, uint256) {
+		// check header itself
+		if (headerByHash[header.hash].isKnown) {
+			return (HeaderCheckResult.AlreadyKnown, header, 0, 0, 0);
+		}
+		if (header.number <= bestFinalizedHeaderNumber) {
+			return (HeaderCheckResult.NonCanonical, header, 0, 0, 0);
+		}
 
 		// check if we're able to coninue chain with this header
-		Header storage parentHeader = headerByHash[header.parentHash];
-		require(
-			parentHeader.isKnown && parentHeader.number == header.number - 1,
-			"Missing parent header from the storage"
-		);
+		if (!parentHeader.isKnown || parentHeader.number != header.number - 1) {
+			return (HeaderCheckResult.MissingParent, header, 0, 0, 0);
+		}
 
 		// forbid appending to fork until we'll get finality proof for header that
 		// requires it
 		if (parentHeader.prevSignalTargetNumber != 0 && parentHeader.prevSignalTargetNumber == parentHeader.number) {
-			require(
-				bestFinalizedHeaderHash == header.parentHash,
-				"Missing required finality proof for parent header"
-			);
+			if (bestFinalizedHeaderHash != header.parentHash) {
+				return (HeaderCheckResult.FinalityProofRequired, header, 0, 0, 0);
+			}
 		}
 
 		// forbid overlapping signals
@@ -275,21 +401,35 @@ contract SubstrateBridge {
 		bytes32 prevSignalHeaderHash = parentHeader.prevSignalHeaderHash;
 		uint256 prevSignalTargetNumber = parentHeader.prevSignalTargetNumber;
 		if (header.signal.length != 0) {
-			require(
-				validatorsSetId != MAX_VALIDATORS_SET_ID,
-				"Reached maximal validators set id"
-			);
-			require(
-				prevSignalTargetNumber < header.number,
-				"Overlapping signals found"
-			);
+			if (validatorsSetId == MAX_VALIDATORS_SET_ID) {
+				return (HeaderCheckResult.InvalidValidatorsSetId, header, 0, 0, 0);
+			}
+			if (prevSignalTargetNumber >= header.number) {
+				return (HeaderCheckResult.ValidatorsSignalsOverlap, header, 0, 0, 0);
+			}
 
 			validatorsSetId = validatorsSetId + 1;
 			prevSignalHeaderHash = header.hash;
 			prevSignalTargetNumber = header.number + header.signalDelay;
 		}
 
-        return (header, validatorsSetId, prevSignalHeaderHash, prevSignalTargetNumber);
+		return (HeaderCheckResult.Valid, header, validatorsSetId, prevSignalHeaderHash, prevSignalTargetNumber);
+	}
+
+	/// Prepare ephemeral in-memory 'stored' header from parsed header.
+	function prepareEphemeralSubstrateHeader(
+		ParsedHeader memory parentHeader,
+		Header memory storedAncestor
+	) private pure returns (Header memory) {
+		return Header({
+			isKnown: true,
+			parentHash: parentHeader.hash,
+			number: parentHeader.number + 1,
+			signal: storedAncestor.signal,
+			validatorsSetId: storedAncestor.validatorsSetId,
+			prevSignalHeaderHash: storedAncestor.prevSignalHeaderHash,
+			prevSignalTargetNumber: storedAncestor.prevSignalTargetNumber
+		});
 	}
 
 	/// Parse Substrate header.
