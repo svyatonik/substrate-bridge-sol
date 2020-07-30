@@ -179,7 +179,7 @@ contract SubstrateBridge {
 		}
 
 		// check header3
-		if (rawHeader2.length == 0)return 0;
+		if (rawHeader3.length == 0)return 0;
 		Header memory header2AsParent = prepareEphemeralSubstrateHeader(header2, parentHeader1);
 		ParsedHeader memory header3 = parseSubstrateHeader(rawHeader3);
 		(
@@ -194,7 +194,7 @@ contract SubstrateBridge {
 		}
 
 		// check header4
-		if (rawHeader2.length == 0)return 0;
+		if (rawHeader4.length == 0)return 0;
 		Header memory header3AsParent = prepareEphemeralSubstrateHeader(header3, parentHeader1);
 		ParsedHeader memory header4 = parseSubstrateHeader(rawHeader4);
 		(
