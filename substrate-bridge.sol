@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Parity Bridges Common.  If not, see <http://www.gnu.org/licenses/>.
 
-pragma solidity ^0.6.4;
+pragma solidity ^0.7.0;
 
 // for simplicity, this contract works with 32-bit headers hashes and headers
 // numbers that can be represented as uint256 (supporting uint256 arithmetics)
@@ -39,40 +39,26 @@ contract SubstrateBridge {
 		ValidatorsSignalsOverlap
 	}
 
-	/// Parsed header.
-	struct ParsedHeader {
-		/// Header hash.
-		bytes32 hash;
-		/// Parent header hash.
-		bytes32 parentHash;
-		/// Header number.
-		uint256 number;
-		/// Validators set change signal delay.
-		uint256 signalDelay;
-		/// Validators set change signal.
-		bytes signal;
-	}
-
 	/// Header as it is stored in the storage.
 	struct Header {
-		/// Flag to ensure that the header exists :/
+		// Flag to ensure that the header exists :/
 		bool isKnown;
 
-		/// Parent header hash.
+		// Parent header hash.
 		bytes32 parentHash;
-		/// Header number.
+		// Header number.
 		uint256 number;
 
-		/// Validators set change signal.
+		// Validators set change signal.
 		bytes signal;
 
-		/// ID of validators set that must finalize this header. This equals to same
-		/// field of the parent + 1 if parent header should enact new set.
+		// ID of validators set that must finalize this header. This equals to same
+		// field of the parent + 1 if parent header should enact new set.
 		uint64 validatorsSetId;
-		/// Hash of the latest header of this fork that has emitted last validators set
-		/// change signal.
+		// Hash of the latest header of this fork that has emitted last validators set
+		// change signal.
 		bytes32 prevSignalHeaderHash;
-		/// Number of the header where latest signal of this fork must be enacted.
+		// Number of the header where latest signal of this fork must be enacted.
 		uint256 prevSignalTargetNumber;
 	}
 
@@ -84,7 +70,7 @@ contract SubstrateBridge {
 		bytes memory rawInitialHeader,
 		uint64 initialValidatorsSetId,
 		bytes memory initialValidatorsSet
-	) public {
+	) {
 		// parse and save header
 		ParsedHeader memory header = parseSubstrateHeader(rawInitialHeader);
 		lastImportedHeaderHash = header.hash;
@@ -547,34 +533,34 @@ contract SubstrateBridge {
 		return finalityTargetHash;
 	}
 
-	/// Maximal validators set id supported by the contract.
+	// Maximal validators set id supported by the contract.
 	uint64 constant MAX_VALIDATORS_SET_ID = 0xFFFFFFFFFFFFFFFF;
 
-	/// Address of parse_substrate_header builtin.
+	// Address of parse_substrate_header builtin.
 	uint256 constant SUBSTRATE_PARSE_HEADER_BUILTIN_ADDRESS = 0x10;
-	/// Address of get_substrate_validators_set_signal builtin.
+	// Address of get_substrate_validators_set_signal builtin.
 	uint256 constant SUBSTRATE_GET_HEADER_SIGNAL_BUILTIN_ADDRESS = 0x11;
-	/// Address of verify_substrate_finality_proof builtin.
+	// Address of verify_substrate_finality_proof builtin.
 	uint256 constant SUBSTRATE_VERIFY_FINALITY_PROOF_BUILTIN_ADDRESS = 0x12;
 
-	/// Last imported header hash.
+	// Last imported header hash.
 	bytes32 lastImportedHeaderHash;
 
-	/// Best finalized header number.
+	// Best finalized header number.
 	uint256 bestFinalizedHeaderNumber;
-	/// Best finalized header hash.
+	// Best finalized header hash.
 	bytes32 bestFinalizedHeaderHash;
-	/// Best finalized validators set id.
+	// Best finalized validators set id.
 	uint64 bestFinalizedValidatorsSetId;
-	/// Best finalized validators set.
+	// Best finalized validators set.
 	bytes bestFinalizedValidatorsSet;
 
-	/// Hashes of headers that require finality proof.
+	// Hashes of headers that require finality proof.
 	bytes32[] incompleteHeadersHashes;
-	/// Map of the incomplete header hash => index+1 within incompleteHeadersHashes.
+	// Map of the incomplete header hash => index+1 within incompleteHeadersHashes.
 	mapping (bytes32 => uint256) incompleteHeadersIndices;
 
-	/// Map of headers by their hashes.
+	// Map of headers by their hashes.
 	mapping (bytes32 => Header) headerByHash;
 }
 
